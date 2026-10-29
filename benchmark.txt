@@ -1,0 +1,35 @@
+#strategy-1 :
+finding average embeddings of every category and using similarity of test to find out the accurate category
+
+Prototype evaluation
+Top-1 Accuracy: 0.5554
+Top-3 Accuracy: 0.7669
+Top-5 Accuracy: 0.8352
+Top-8 Accuracy: 0.8838
+Top-10 Accuracy: 0.9029
+Top-1 Accuracy: 0.5554
+Macro Recall: 0.5514 
+
+#strategy-2:
+finding k prototypes for every category in 248 categories using k-means clustering and using those prototypes applying 
+similarity score for every prototype and maximum similarity score of the prototypes is given to the category and based\
+on that we will get our top -n categories
+
+Prototype evaluation
+Top-1 Accuracy: 0.6678
+Top-3 Accuracy: 0.8683
+Top-5 Accuracy: 0.9133
+Top-8 Accuracy: 0.9411
+Top-10 Accuracy: 0.9511
+Macro Recall: 0.6573
+
+#strategy-3:
+
+
+Prototype evaluation
+Top-1 Accuracy: 0.7555
+Top-3 Accuracy: 0.9328
+Top-5 Accuracy: 0.9601
+Top-8 Accuracy: 0.9734
+Top-10 Accuracy: 0.9780
+Macro Recall: 0.6808

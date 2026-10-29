@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+
+# Large datasets
+Data/
+
+# Runtime memory and generated data
+Memory/
+
+# Excluded project files
+Group 11-Shopping Agent.pdf
+demo.ipynb
