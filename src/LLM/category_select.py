@@ -1,7 +1,7 @@
 from src.LLM.embedding import model,category_embeddings,categories
 import numpy as np 
 
-def get_top_categories(llm_category, top_k=5):
+def get_top_categories(llm_category, top_k=3):
 
     query_embedding = model.encode(
         [llm_category],
@@ -17,10 +17,10 @@ def get_top_categories(llm_category, top_k=5):
     category_ids=[]
     for idx in top_indices:
         results.append({
-            "category_id": int(categories.iloc[idx]["id"]),
+            "category_id": int(categories.iloc[idx]["category_id"]),
             "category_name": categories.iloc[idx]["category_name"],
             "embedding_score": round(float(embedding_scores[idx]), 4),
         }) 
-        category_ids.append( int(categories.iloc[idx]["id"]))
+        category_ids.append( int(categories.iloc[idx]["category_id"]))
     
     return results,category_ids

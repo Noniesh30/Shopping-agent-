@@ -11,7 +11,7 @@ def normalize(text):
 model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 print("Loading model completed")
 folder = "Data\\"
-categories = pd.read_csv(folder + "amazon_categories.csv")
+categories = pd.read_csv(folder + "amazon_final_category_mapping.csv")
 categories["normalized_name"] = categories["category_name"].apply(normalize)
 category_names = categories["normalized_name"].tolist()
 

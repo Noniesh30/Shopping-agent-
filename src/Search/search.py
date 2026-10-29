@@ -1,6 +1,4 @@
-
 from src.Search.product_search import search_products
-import json
 import pandas as pd
 
 class Searching:
@@ -9,58 +7,46 @@ class Searching:
         self.products, self.categories = products,categories
         self.nodes_explored = 0
         self.backtracks = 0
-        self.top_k_solutions=10
 
-    def get_domains(self, requirements):
+    def get_domains(self, items):
         domains = {}
-        total_possible_combinations=1
-        for item in requirements["items"]:
-            item_name = item["name"]
+        total_possible_combinations = 1
+
+        for item_name, item in items.items():
             category_ids = item["category_id"]
 
             if not isinstance(category_ids, list):
                 category_ids = [category_ids]
 
             products = self.products
+
             domain = products[
-                products["asin"].notna()&
-                products["title"].notna()&
+                products["asin"].notna() &
+                products["title"].notna() &
                 products["category_id"].isin(category_ids) &
+                products["category_name"].notna() &
                 products["price_inr"].notna() &
                 products["stars"].notna() &
-                products["reviews"].notna()&
-                products["imgUrl"].notna()
+                products["reviews"].notna()
             ]
-
 
             if item.get("budget") is not None:
                 domain = domain[domain["price_inr"] <= item["budget"]]
 
             if item.get("min_rating") is not None:
-                domain = domain[
-                    domain["stars"] >= item["min_rating"]
-                ]
+                domain = domain[domain["stars"] >= item["min_rating"]]
 
             if item.get("min_reviews") is not None:
-                domain = domain[
-                    domain["reviews"] >= item["min_reviews"]
-                ]
-
-            #Searching According to the Name 
-            # if item.get("keywords") is not None:
-            #     for keyword in item["keywords"]:
-            #         domain = domain[domain["title"].astype(str).str.contains(keyword, case=False, na=False)] 
-
-            # if item.get("preferences") is not None:
-            #     for preference in item["preferences"]:
-            #         domain = domain[domain["title"].astype(str).str.contains(preference, case=False, na=False)]
+                domain = domain[domain["reviews"] >= item["min_reviews"]]
 
             domain = search_products(domain, item)
-            domains[item_name] = domain 
-            total_possible_combinations*=len(domain)
+
+            domains[item_name] = domain
+            total_possible_combinations *= len(domain)
+
             print(item_name, "domain size:", len(domain))
 
-        return domains,total_possible_combinations
+        return domains, total_possible_combinations
 
     def is_consistent(self, assignment, new_product, item, requirements):
         for product in assignment.values():
@@ -134,21 +120,33 @@ class Searching:
             results.append(result)
             
         return results
-
+    
     def finding_products(self, requirements):
         print(requirements)
 
-        variables = [item["name"] for item in requirements["items"]]
-        items = {item["name"]: item for item in requirements["items"]}
+        # variables = [item["name"] for item in requirements["items"]]
+        # items = {item["name"]: item for item in requirements["items"]}
+        from collections import defaultdict
+
+        variables = []
+        items = {}
+        name_count = defaultdict(int)
+
+        for item in requirements["items"]:
+            name = item["name"].strip().lower()
+            name_count[name] += 1
+
+            unique_name = f"{name}-{name_count[name]}"
+
+            variables.append(unique_name)
+            items[unique_name] = item
 
         self.nodes_explored = 0
         self.backtracks = 0
 
-        domains,total_possible_combinations = self.get_domains(requirements)
+        domains, total_possible_combinations = self.get_domains(items)
         print("Total Possible Combiantions:",total_possible_combinations)
-
-        #Top solutions 
-        # self.top_k_solutions=10
+        top_k_solutions=10
 
         # Fail early if any item has an empty domain
         if any(domains[v].empty for v in variables):
@@ -159,7 +157,7 @@ class Searching:
 
         self.backtracking_search(
             variables, domains, {}, requirements, items,
-            solutions, max_solutions=self.top_k_solutions
+            solutions, max_solutions=top_k_solutions
         )
 
         if not solutions:
@@ -174,10 +172,12 @@ class Searching:
                     print("Item:", variable)
                     print("Product:", product["title"])
                     print("Price:", product["price_inr"])
-                    print("Category:", product["category_id"])
+                    print("Category ID:", product["category_id"])
+                    print("Category Name:", product["category_name"])
                     total_cost += product["price_inr"]
-
-                print("------------------------")
+                    print("------------------------")
+                    
+                print("=============================")
                 print("Total cost:", total_cost)
 
 
