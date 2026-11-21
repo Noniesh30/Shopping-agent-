@@ -7,6 +7,7 @@ class Searching:
         self.products, self.categories = products,categories
         self.nodes_explored = 0
         self.backtracks = 0
+        self.top_k_solutions=100
 
     def get_domains(self, items):
         domains = {}
@@ -40,12 +41,13 @@ class Searching:
                 domain = domain[domain["reviews"] >= item["min_reviews"]]
 
             domain = search_products(domain, item)
+            total_possible_combinations *= len(domain)
+            print(item_name, "domain size:", len(domain))
+            #Resrtrciting solutions
+            if len(domain)>11:
+                domain=domain[:10]
 
             domains[item_name] = domain
-            total_possible_combinations *= len(domain)
-
-            print(item_name, "domain size:", len(domain))
-
         return domains, total_possible_combinations
 
     def is_consistent(self, assignment, new_product, item, requirements):
@@ -146,7 +148,7 @@ class Searching:
 
         domains, total_possible_combinations = self.get_domains(items)
         print("Total Possible Combiantions:",total_possible_combinations)
-        top_k_solutions=10
+        
 
         # Fail early if any item has an empty domain
         if any(domains[v].empty for v in variables):
@@ -157,7 +159,7 @@ class Searching:
 
         self.backtracking_search(
             variables, domains, {}, requirements, items,
-            solutions, max_solutions=top_k_solutions
+            solutions, max_solutions=self.top_k_solutions
         )
 
         if not solutions:
@@ -168,8 +170,10 @@ class Searching:
 
                 total_cost = 0
 
+                print("TOTAL SOLUTIONS:",len(solutions))
                 for variable, product in solution.items():
                     print("Item:", variable)
+                    print("Unique ID:",product["asin"])
                     print("Product:", product["title"])
                     print("Price:", product["price_inr"])
                     print("Category ID:", product["category_id"])

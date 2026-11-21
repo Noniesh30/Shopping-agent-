@@ -9,7 +9,8 @@ __pycache__/
 Data/
 
 # Runtime memory and generated data
-Memory/
+User_Memory/
+Users/
 
 # Excluded project files
 Group 11-Shopping Agent.pdf

@@ -1,7 +1,7 @@
 from src.LLM.embedding import model,category_embeddings,categories
 import numpy as np 
 
-def get_top_categories(llm_category, top_k=3):
+def get_top_categories(llm_category, top_k):
 
     query_embedding = model.encode(
         [llm_category],
@@ -15,7 +15,10 @@ def get_top_categories(llm_category, top_k=3):
 
     results = []
     category_ids=[]
+    print(f"Top {top_k} categories:")
+    print("Category_id          Category_name")
     for idx in top_indices:
+        print(int(categories.iloc[idx]["category_id"]),categories.iloc[idx]["category_name"])
         results.append({
             "category_id": int(categories.iloc[idx]["category_id"]),
             "category_name": categories.iloc[idx]["category_name"],

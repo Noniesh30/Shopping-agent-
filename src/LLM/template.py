@@ -88,13 +88,13 @@ def elaborate_product(product_name,preferences):
      
 
     
-def adding_category(template):
+def adding_category(template,top_k):
     llm_items=template["items"]
     for i in range(len(llm_items)):
             llm_category=template["items"][i]["name"]
             preferences=template["items"][i]["preferences"]
             elaborate_promt=elaborate_product(llm_category,preferences)
-            results,category_ids=get_top_categories(elaborate_promt)
+            results,category_ids=get_top_categories(elaborate_promt,top_k)
             template["items"][i]["category_id"]=category_ids 
     return template
 
@@ -116,7 +116,8 @@ def extract_requirements(user_prompt):
 
     template=json.loads(response.choices[0].message.content)# pyright: ignore[reportArgumentType]
     template=attributes(template,user_prompt)
-    main_template=adding_category(template)
 
-    
+     #top Categories
+    top_k=3
+    main_template=adding_category(template,top_k)    
     return main_template
