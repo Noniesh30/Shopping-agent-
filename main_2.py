@@ -4,6 +4,7 @@ import hashlib
 import re
 import tempfile
 import threading
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ import pandas as pd
 from src.Memory.Memory_store import load_user_data,get_registered_user,load_user_memory,write_json_atomically
 from src.Memory.Memory_store import user_memory_path,EmailRequest,migrate_legacy_memory,DataRequest,ProductMemoryRequest
 from src.Memory.Memory_store import USER_DATA_PATH,MEMORY_DIRECTORY
+from src.Memory.Memory_store import buy,click
 
 print("Startup Completed")
 products,categories=data_ingest()
@@ -53,32 +55,168 @@ app.add_middleware(
 data_store = {}
 
 
-def append_user_event(user_id: str, memory_type: str, event: dict[str, Any]) -> None:
-    memory_key = f"{memory_type}_memory"
+def append_preference_memory_record(
+    memory: dict[str, Any],
+    user_id: str,
+    item: dict[str, Any],
+    source_type: str,
+    use_freq: int,
+    product: dict[str, Any] | None = None,
+    bought: bool | None = None,
+) -> dict[str, Any]:
+    records = memory["preference_memory"]
+    memory_fields = requirement_memory_fields(item)
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "user_id": user_id,
+        "memory_id": max(
+            (int(existing.get("memory_id", 0)) for existing in records),
+            default=0,
+        ) + 1,
+        **memory_fields,
+        "source_type": source_type,
+    }
+    if product is not None:
+        record.update({
+            "product_id": product.get("asin") or product.get("id"),
+            "product_name": product.get("title") or product.get("name"),
+            "product_details": product,
+        })
+    if bought is not None:
+        record["bought"] = bought
+    record.update({
+        "created_at": now,
+        "last_updated_at": now,
+        "use_freq": use_freq,
+        "hash_value": hashlib.sha256(
+            json.dumps(
+                memory_fields,
+                sort_keys=True,
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest(),
+    })
+    records.append(record)
+    return record
+
+
+def pass_through_user_memory(
+    user_id: str,
+    memory_type: str,
+    product: dict[str, Any],
+    action: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any]:
     with user_data_lock:
         try:
             user_data = load_user_data()
             if get_registered_user(user_data, user_id) is None:
                 raise HTTPException(status_code=404, detail="User not found.")
-
+            memory_path = user_memory_path(user_id)
             memory = load_user_memory(user_id)
-            records = memory[memory_key]
-            records.append({
-                "memory_id": max(
-                    (int(record.get("memory_id", 0)) for record in records),
-                    default=0,
-                ) + 1,
-                "user_id": user_id,
-                **event,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            write_json_atomically(user_memory_path(user_id), memory)
+
+            if memory_type == "click":
+                category = product.get("category")
+                product_id = product.get("asin") or product.get("id")
+                product_name = product.get("title") or product.get("name")
+                inferred_record = next(
+                    (
+                        record for record in reversed(memory["preference_memory"])
+                        if record.get("source_type") == "agent_inferred"
+                        and (
+                            (product_id and record.get("product_id") == product_id)
+                            or (
+                                not product_id
+                                and product_name
+                                and record.get("product_name") == product_name
+                            )
+                        )
+                    ),
+                    None,
+                )
+                item = data_store.get(user_id, {}).get(
+                    "requirements_by_category",
+                    {},
+                ).get(category)
+                if item is None:
+                    item = inferred_item_from_product(product)
+                if inferred_record is None:
+                    append_preference_memory_record(
+                        memory,
+                        user_id,
+                        item,
+                        source_type="agent_inferred",
+                        use_freq=0,
+                        product=product,
+                        bought=False,
+                    )
+                else:
+                    inferred_record["product_id"] = product_id
+                    inferred_record["product_name"] = product_name
+                    inferred_record["product_details"] = product
+                    inferred_record["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+            elif memory_type == "buy":
+                product_id = product.get("asin") or product.get("id")
+                category = product.get("category")
+                category_name = (
+                    re.sub(r"-\d+$", "", category).replace("-", " ").strip().lower()
+                    if isinstance(category, str)
+                    else ""
+                )
+                inferred_record = next(
+                    (
+                        record for record in reversed(memory["preference_memory"])
+                        if record.get("source_type") == "agent_inferred"
+                        and (
+                            record.get("product_id") == product_id
+                            or record.get("product_name") == (
+                                product.get("title") or product.get("name")
+                            )
+                            or (
+                                not record.get("product_id")
+                                and category_name
+                                and str(record.get("name", "")).strip().lower()
+                                == category_name
+                            )
+                        )
+                    ),
+                    None,
+                )
+                if inferred_record is None:
+                    item = data_store.get(user_id, {}).get(
+                        "requirements_by_category",
+                        {},
+                    ).get(category)
+                    if item is None:
+                        item = inferred_item_from_product(product)
+                    inferred_record = append_preference_memory_record(
+                        memory,
+                        user_id,
+                        item,
+                        source_type="agent_inferred",
+                        use_freq=0,
+                        product=product,
+                        bought=True,
+                    )
+                else:
+                    inferred_record["bought"] = True
+                    inferred_record["product_id"] = product_id
+                    inferred_record["product_name"] = (
+                        product.get("title") or product.get("name")
+                    )
+                    inferred_record["product_details"] = product
+                    inferred_record["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+            updated_memory = action(memory)
+            if not isinstance(updated_memory, dict):
+                raise ValueError("The memory action must return a JSON object.")
+            write_json_atomically(memory_path, updated_memory)
+            return updated_memory
         except HTTPException:
             raise
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Could not save {memory_type} memory.",
+                detail="Could not process user memory action.",
             ) from exc
 
 
@@ -133,9 +271,7 @@ def send_data(request: DataRequest):
         if get_registered_user(user_data, request.user_id) is None:
             raise HTTPException(status_code=404, detail="User not found.")
 
-    data_store[request.user_id] = {
-        "user_prompt": request.user_prompt
-    }
+    data_store[request.user_id] = {"user_prompt": request.user_prompt}
 
     print("Received prompt:", request.user_prompt)
     return {
@@ -146,25 +282,22 @@ def send_data(request: DataRequest):
 
 @app.post("/memory/click")
 def record_product_click(request: ProductMemoryRequest):
-    append_user_event(
+    return pass_through_user_memory(
         request.user_id,
         "click",
-        {"product": request.product},
+        request.product,
+        click,
     )
-    return {"status": "success", "message": "Product click recorded."}
 
 
 @app.post("/memory/buy")
 def record_buy_click(request: ProductMemoryRequest):
-    append_user_event(
+    return pass_through_user_memory(
         request.user_id,
         "buy",
-        {"product": request.product},
+        request.product,
+        buy,
     )
-    return {
-        "status": "success",
-        "message": "Buy click recorded; retailer purchase is not confirmed.",
-    }
 
 
 # Route 2: Send data to the client
@@ -175,8 +308,10 @@ def receive_data(user_id: str):
     prompt = data_store[user_id]["user_prompt"]
     try:
         requirements = extract_requirements(prompt)
-        save_prompt_memory(user_id, prompt, requirements)
         save_user_memory(user_id, requirements)
+        data_store[user_id]["requirements_by_category"] = requirements_by_search_category(
+            requirements
+        )
     except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
         raise HTTPException(status_code=500, detail="Could not save search memory.") from exc
     print(requirements)
@@ -191,13 +326,39 @@ def requirement_memory_fields(item: dict[str, Any]) -> dict[str, Any]:
     attributes = item.get("attributes", {})
     if not isinstance(attributes, dict):
         attributes = {}
-    preferences = {
-        key: (values[0] if len(values) == 1 and key != "others" else values)
-        for key, values in attributes.items()
-        if isinstance(values, list) and values
-    }
-    if not preferences and isinstance(item.get("preferences"), list):
-        preferences = {"others": item["preferences"]} if item["preferences"] else {}
+
+    preference_fields = ("color", "size", "target_user", "material", "brand", "use_case")
+    preferences: dict[str, Any] = {key: "" for key in preference_fields}
+    preferences["others"] = []
+
+    def preference_value(value: Any) -> str:
+        if isinstance(value, list):
+            return ", ".join(str(entry) for entry in value if entry is not None)
+        return str(value) if value is not None else ""
+
+    raw_preferences = item.get("preferences")
+    if isinstance(raw_preferences, dict):
+        for key, value in raw_preferences.items():
+            if key in preference_fields:
+                normalized_value = preference_value(value)
+                if normalized_value:
+                    preferences[key] = normalized_value
+            elif key == "others" and isinstance(value, list):
+                preferences["others"].extend(value)
+            elif value:
+                preferences["others"].append(f"{key}: {preference_value(value)}")
+    elif isinstance(raw_preferences, list):
+        preferences["others"].extend(raw_preferences)
+
+    for key, value in attributes.items():
+        if key in preference_fields:
+            normalized_value = preference_value(value)
+            if normalized_value:
+                preferences[key] = normalized_value
+        elif key == "others" and isinstance(value, list):
+            preferences["others"].extend(value)
+        elif value:
+            preferences["others"].append(f"{key}: {preference_value(value)}")
 
     return {
         "name": item.get("name", ""),
@@ -209,51 +370,39 @@ def requirement_memory_fields(item: dict[str, Any]) -> dict[str, Any]:
         "category_id": item.get("category_id", []),
     }
 
-def save_prompt_memory(
-    user_id: str,
-    prompt: str,
+
+def requirements_by_search_category(
     requirements: dict[str, Any],
-) -> None:
+) -> dict[str, dict[str, Any]]:
     items = requirements.get("items")
     if not isinstance(items, list):
         raise ValueError("Extracted requirements must contain an items list.")
-    if not items:
-        items = [{}]
 
-    with user_data_lock:
-        user_data = load_user_data()
-        if get_registered_user(user_data, user_id) is None:
-            raise HTTPException(status_code=404, detail="User not found.")
+    category_requirements = {}
+    name_counts: dict[str, int] = {}
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise ValueError("An extracted requirement has an invalid name.")
+        name = item["name"].strip().lower()
+        name_counts[name] = name_counts.get(name, 0) + 1
+        category_requirements[f"{name}-{name_counts[name]}"] = item
+    return category_requirements
 
-        memory = load_user_memory(user_id)
-        records = memory["prompt_memory"]
-        now = datetime.now(timezone.utc).isoformat()
-        for item in items:
-            if not isinstance(item, dict):
-                raise ValueError("An extracted requirement is invalid.")
-            memory_fields = requirement_memory_fields(item)
-            fingerprint = hashlib.sha256(
-                json.dumps(
-                    {"prompt": prompt, **memory_fields},
-                    sort_keys=True,
-                    ensure_ascii=False,
-                ).encode("utf-8")
-            ).hexdigest()
-            records.append({
-                "memory_id": max(
-                    (int(record.get("memory_id", 0)) for record in records),
-                    default=0,
-                ) + 1,
-                "user_id": user_id,
-                **memory_fields,
-                "prompt": prompt,
-                "source_type": "user_prompt",
-                "created_at": now,
-                "last_updated_at": now,
-                "hash_value": fingerprint,
-                "use_freq": 1,
-            })
-        write_json_atomically(user_memory_path(user_id), memory)
+
+def inferred_item_from_product(product: dict[str, Any]) -> dict[str, Any]:
+    category = product.get("category")
+    title = product.get("title")
+    category_name = re.sub(r"-\d+$", "", category).replace("-", " ") if isinstance(category, str) else ""
+    name = category_name or (title.strip() if isinstance(title, str) else "")
+    return {
+        "name": name,
+        "keywords": re.findall(r"[a-z0-9]+", name.lower()),
+        "preferences": {},
+        "budget": None,
+        "min_rating": None,
+        "min_reviews": None,
+        "category_id": [],
+    }
 
 
 def save_user_memory(user_id: str, requirements: dict[str, Any]) -> None:
@@ -290,19 +439,16 @@ def save_user_memory(user_id: str, requirements: dict[str, Any]) -> None:
                 existing["use_freq"] = int(existing.get("use_freq", 1)) + 1
                 continue
 
-            records.append({
-                "user_id": user_id,
-                "memory_id": max(
-                    (int(record.get("memory_id", 0)) for record in records),
-                    default=0,
-                ) + 1,
-                **memory_data,
-                "source_type": "user_prompt",
-                "created_at": now,
-                "last_updated_at": now,
-                "hash_value": fingerprint,
-                "use_freq": 1,
-            })
+            record = append_preference_memory_record(
+                memory,
+                user_id,
+                item,
+                source_type="user_prompt",
+                use_freq=1,
+            )
+            record["created_at"] = now
+            record["last_updated_at"] = now
+            record["hash_value"] = fingerprint
 
         write_json_atomically(memory_path, memory)
 

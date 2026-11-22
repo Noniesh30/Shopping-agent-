@@ -11,8 +11,9 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from typing import Any
 
-USER_DATA_PATH = Path(__file__).resolve().parent / "Users" / "shop_users.json"
-MEMORY_DIRECTORY = Path(__file__).resolve().parent / "User_Memory"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+USER_DATA_PATH = PROJECT_ROOT / "Users" / "shop_users.json"
+MEMORY_DIRECTORY = PROJECT_ROOT / "User_Memory"
 
 # Request model
 class DataRequest(BaseModel):
@@ -56,14 +57,92 @@ def load_user_data() -> dict[str, Any]:
 
 
 def user_memory_path(user_id: str) -> Path:
-    email_hash = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
-    return MEMORY_DIRECTORY / f"user_{email_hash}.json"
+    username = user_id.partition("@")[0]
+    safe_username = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", username).rstrip(" .")
+    if not safe_username:
+        raise ValueError("The user ID does not contain a valid filename.")
+    if safe_username.upper() in {
+        "CON", "PRN", "AUX", "NUL",
+        *(f"COM{number}" for number in range(1, 10)),
+        *(f"LPT{number}" for number in range(1, 10)),
+    }:
+        safe_username = f"_{safe_username}"
+    return MEMORY_DIRECTORY / f"{safe_username}.json"
 
 
-def user_event_memory_path(user_id: str, memory_type: str) -> Path:
-    email_hash = hashlib.sha256(user_id.encode("utf-8")).hexdigest()
-    return MEMORY_DIRECTORY / f"user_{email_hash}_{memory_type}_memory.json"
+def migrate_legacy_clicks(
+    user_id: str,
+    memory: dict[str, Any],
+    preference_records: list[dict[str, Any]],
+) -> None:
+    prompt_records = memory.get("prompt_memory", [])
+    click_records = memory.get("click_memory", [])
+    if not isinstance(prompt_records, list) or any(
+        not isinstance(record, dict) for record in prompt_records
+    ):
+        raise ValueError("The legacy prompt_memory data has an invalid structure.")
+    if not isinstance(click_records, list) or any(
+        not isinstance(record, dict) for record in click_records
+    ):
+        raise ValueError("The legacy click_memory data has an invalid structure.")
 
+    prompts_by_category = {}
+    name_counts: dict[str, int] = {}
+    for record in prompt_records:
+        name = record.get("name")
+        if not isinstance(name, str):
+            continue
+        normalized_name = name.strip().lower()
+        name_counts[normalized_name] = name_counts.get(normalized_name, 0) + 1
+        prompts_by_category[f"{normalized_name}-{name_counts[normalized_name]}"] = record
+
+    for click_record in click_records:
+        linked_memory_id = click_record.get("preference_memory_id")
+        if any(
+            record.get("memory_id") == linked_memory_id
+            and record.get("source_type") == "agent_inferred"
+            for record in preference_records
+        ):
+            continue
+
+        product = click_record.get("product", {})
+        category = product.get("category") if isinstance(product, dict) else None
+        prompt_record = prompts_by_category.get(category)
+        if prompt_record is None:
+            continue
+
+        memory_fields = {
+            key: prompt_record.get(key)
+            for key in (
+                "name",
+                "keywords",
+                "preferences",
+                "budget",
+                "min_rating",
+                "min_reviews",
+                "category_id",
+            )
+        }
+        created_at = click_record.get("created_at") or datetime.now(timezone.utc).isoformat()
+        preference_records.append({
+            "user_id": user_id,
+            "memory_id": max(
+                (int(record.get("memory_id", 0)) for record in preference_records),
+                default=0,
+            ) + 1,
+            **memory_fields,
+            "source_type": "agent_inferred",
+            "created_at": created_at,
+            "last_updated_at": created_at,
+            "use_freq": 0,
+            "hash_value": hashlib.sha256(
+                json.dumps(
+                    memory_fields,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ).encode("utf-8")
+            ).hexdigest(),
+        })
 
 
 def load_user_memory(user_id: str) -> dict[str, Any]:
@@ -77,9 +156,6 @@ def load_user_memory(user_id: str) -> dict[str, Any]:
             memory = {
                 "user_id": user_id,
                 "preference_memory": memory,
-                "prompt_memory": [],
-                "click_memory": [],
-                "buy_memory": [],
             }
 
         if not isinstance(memory, dict):
@@ -89,61 +165,45 @@ def load_user_memory(user_id: str) -> dict[str, Any]:
         memory = {}
 
     # Initialize top-level structure
-    memory["user_id"] = user_id
+    records = memory.get("preference_memory", [])
+    if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+        raise ValueError("The preference_memory data has an invalid structure.")
+    migrate_legacy_clicks(user_id, memory, records)
+    for record in records:
+        if record.get("source_type") == "agent_inferred":
+            record.setdefault("bought", False)
 
-    for key in ("preference_memory", "prompt_memory", "click_memory", "buy_memory"):
-        memory.setdefault(key, [])
+    unique_records = []
+    inferred_by_product_id = {}
+    for record in records:
+        product_id = record.get("product_id")
+        if record.get("source_type") != "agent_inferred" or not product_id:
+            unique_records.append(record)
+            continue
 
-        if not isinstance(memory[key], list) or any(
-            not isinstance(record, dict) for record in memory[key]
-        ):
-            raise ValueError(f"The {key} data has an invalid structure.")
+        existing = inferred_by_product_id.get(product_id)
+        if existing is None:
+            inferred_by_product_id[product_id] = record
+            unique_records.append(record)
+            continue
 
-    # Initialize and validate prompt memory records
-    for record in memory["prompt_memory"]:
-        record.setdefault("name", "")
-        record.setdefault("keywords", [])
-        record.setdefault("preferences", {})
-        record.setdefault("budget", None)
-        record.setdefault("min_rating", None)
-        record.setdefault("min_reviews", None)
-        record.setdefault("category_id", [])
-        record.setdefault("source_type", "user_prompt")
-        record.setdefault("last_updated_at", record.get("created_at"))
-        record.setdefault("use_freq", 1)
+        existing["bought"] = bool(existing.get("bought")) or bool(record.get("bought"))
+        for field in ("product_name", "product_details", "last_updated_at"):
+            if field in record:
+                existing[field] = record[field]
 
-        # Validate record fields
-        if not isinstance(record["keywords"], list):
-            raise ValueError("Prompt keywords must be a list.")
+    return {
+        "user_id": user_id,
+        "preference_memory": unique_records,
+    }
 
-        if not isinstance(record["preferences"], dict):
-            raise ValueError("Prompt preferences must be a dictionary.")
 
-        if not isinstance(record["category_id"], list):
-            raise ValueError("Prompt category_id must be a list.")
+def click(user_memory: dict[str, Any]) -> dict[str, Any]:
+    return user_memory
 
-        # Generate hash if missing
-        if not record.get("hash_value"):
-            hash_data = {
-                "prompt": record.get("prompt", ""),
-                "name": record["name"],
-                "keywords": record["keywords"],
-                "preferences": record["preferences"],
-                "budget": record["budget"],
-                "min_rating": record["min_rating"],
-                "min_reviews": record["min_reviews"],
-                "category_id": record["category_id"],
-            }
 
-            record["hash_value"] = hashlib.sha256(
-                json.dumps(
-                    hash_data,
-                    sort_keys=True,
-                    ensure_ascii=False,
-                ).encode("utf-8")
-            ).hexdigest()
-
-    return memory
+def buy(user_memory: dict[str, Any]) -> dict[str, Any]:
+    return user_memory
 
 
 
@@ -168,22 +228,6 @@ def migrate_legacy_memory(user: dict[str, Any], user_id: str) -> None:
                 record["user_id"] = user_id
                 record["memory_id"] = memory_id
             paths_to_remove.append(legacy_path)
-
-    for memory_type in ("prompt", "click", "buy"):
-        event_path = user_event_memory_path(user_id, memory_type)
-        if not event_path.exists():
-            continue
-        event_records = json.loads(event_path.read_text(encoding="utf-8"))
-        if not isinstance(event_records, list) or any(
-            not isinstance(record, dict) for record in event_records
-        ):
-            raise ValueError(f"The {memory_type} memory file has an invalid structure.")
-        target_records = memory[f"{memory_type}_memory"]
-        target_records.extend(event_records)
-        for memory_id, record in enumerate(target_records, start=1):
-            record["user_id"] = user_id
-            record["memory_id"] = memory_id
-        paths_to_remove.append(event_path)
 
     write_json_atomically(memory_path, memory)
     for path in paths_to_remove:
