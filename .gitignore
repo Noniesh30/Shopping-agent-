@@ -11,6 +11,9 @@ Data/
 # Runtime memory and generated data
 User_Memory/
 Users/
+src/rl_module
+src/tests_rl
+src/LLM/__pycache__
 
 # Excluded project files
 Group 11-Shopping Agent.pdf

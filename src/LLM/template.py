@@ -7,6 +7,7 @@ from src.LLM.category_select import get_top_categories
 from src.LLM.TEMPLATES.main_template import PROMPT_TEMPLATE
 from src.LLM.TEMPLATES.min_attribute import PROMPT_TEMPLATE_ATT_MIN
 from src.LLM.TEMPLATES.product_template import PROMPT_TEMPLATE_PRODUCT
+from src.LLM.TEMPLATES.title_attribute import PROMPT_TEMPLATE_TITLE
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -23,6 +24,27 @@ client_2=Groq(api_key=os.getenv("GROQ_API_KEY_2"))
 # for model in models.data:
 #     print(model.id)
 
+def extract_product_attributes(product_title):
+    prompt = PROMPT_TEMPLATE_TITLE.format(
+        product_title=product_title
+    )
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[
+            {
+                "role": "system",
+                "content": "Extract product attributes accurately. Return valid JSON only."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0,
+        response_format={"type": "json_object"}
+    )
+    result = response.choices[0].message.content
+    return json.loads(result) # type: ignore
 
 
 def attributes(template,promt_main):

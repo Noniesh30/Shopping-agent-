@@ -1,5 +1,5 @@
 from src.Search.product_search import search_products
-import pandas as pd
+from src.utils.reorder import reorder_bundles
 
 class Searching:
     def __init__(self,products,categories):
@@ -165,28 +165,28 @@ class Searching:
         if not solutions:
             print("NO FEASIBLE SOLUTION FOUND")
         else:
-            for i, solution in enumerate(solutions, 1):
-                print(f"\nSolution {i}")
-
-                total_cost = 0
-
-                print("TOTAL SOLUTIONS:",len(solutions))
-                for variable, product in solution.items():
-                    print("Item:", variable)
-                    print("Unique ID:",product["asin"])
-                    print("Product:", product["title"])
-                    print("Price:", product["price_inr"])
-                    print("Category ID:", product["category_id"])
-                    print("Category Name:", product["category_name"])
-                    total_cost += product["price_inr"]
-                    print("------------------------")
-                    
-                print("=============================")
-                print("Total cost:", total_cost)
+            print("TOTAL SOLUTIONS:",len(solutions))
+            # for i, solution in enumerate(solutions, 1):
+            #     print(f"\nSolution {i}")
+            #     total_cost = 0
+                
+            #     for variable, product in solution.items():
+            #         print("Item:", variable)
+            #         print("Unique ID:",product["asin"])
+            #         print("Product:", product["title"])
+            #         print("Price:", product["price_inr"])
+            #         print("Category ID:", product["category_id"])
+            #         print("Category Name:", product["category_name"])
+            #         total_cost += product["price_inr"]
+            #         print("------------------------")
+          
+            #     print("=============================")
+            #     print("Total cost:", total_cost)
 
 
         print("Budget:", requirements.get("budget"))
         print("Nodes explored:", self.nodes_explored)
         print("Backtracks:", self.backtracks)
 
-        return self.json_compatiable(solutions)
+        sorted_solutions = reorder_bundles(solutions)
+        return self.json_compatiable(sorted_solutions)

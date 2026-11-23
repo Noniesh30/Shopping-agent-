@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import HTTPException
 from pydantic import BaseModel
 from typing import Any
+from src.LLM.template import extract_product_attributes
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USER_DATA_PATH = PROJECT_ROOT / "Users" / "shop_users.json"
@@ -198,16 +199,43 @@ def load_user_memory(user_id: str) -> dict[str, Any]:
     }
 
 
+def merge_dicts(dict1, dict2):
+    final_dict = {}
+
+    for key in dict1:
+        val1 = dict1[key]
+        val2 = dict2[key]
+
+        if val1 is None and val2 is None:
+            final_dict[key] = None
+        elif val1 is None:
+            final_dict[key] = val2
+        elif val2 is None:
+            final_dict[key] = val1
+
+        elif isinstance(val1, list) and not isinstance(val2, list):
+            final_dict[key] = val2
+        elif isinstance(val2, list) and not isinstance(val1, list):
+            final_dict[key] = val1
+        else:
+            final_dict[key] = val2
+
+    return final_dict
+
+
 def click(user_memory: dict[str, Any]) -> dict[str, Any]:
+    print("=============================")
+    print("Adding product Preferences")
+    product_title=user_memory["product_name"]
+    preferences=extract_product_attributes(product_title)
+    preferences_main=user_memory['preferences']
+    final_preferences=merge_dicts(preferences,preferences_main)
+    user_memory['preferences']=final_preferences
     return user_memory
 
 
 def buy(user_memory: dict[str, Any]) -> dict[str, Any]:
     return user_memory
-
-
-
-
 
 def migrate_legacy_memory(user: dict[str, Any], user_id: str) -> None:
     legacy_id = user.get("user_id")

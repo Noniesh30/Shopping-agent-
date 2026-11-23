@@ -228,7 +228,7 @@ if not st.session_state.authenticated:
         with st.form("login_form"):
             email = st.text_input("Email", placeholder="you@example.com")
             password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign in", use_container_width=True)
+            submitted = st.form_submit_button("Sign in", width='stretch')
 
         st.markdown(
             '<div class="login-note">Demo sign-in stores your email in the backend. '
@@ -282,11 +282,13 @@ if st.session_state.page == "product":
         with left:
             image_url = product.get("imgUrl")
             if image_url:
-                st.image(image_url, use_container_width=True)
+                st.image(image_url,  width='stretch')
 
         with right:
             st.caption(category)
             st.subheader(product.get("title", "Untitled Product"))
+            st.write(f"**Category ID:** ★ {product.get('category_id', 'N/A')}")
+            st.write(f"**Category Name:** ★ {product.get('category_name', 'N/A')}")
             st.write(f"**Price:** {money_inr(product.get('price_inr'))}")
             st.write(f"**Rating:** ★ {product.get('stars', 'N/A')}")
             st.write(f"**Reviews:** {product.get('reviews', 0)}")
@@ -294,15 +296,15 @@ if st.session_state.page == "product":
 
             product_url = product.get("productURL")
             if isinstance(product_url, str) and product_url.startswith(("https://", "http://")):
-                if st.button("Buy Now", use_container_width=True):
-                    if record_product_event("buy", product, category):
-                        st.link_button("Continue to retailer ↗", product_url, use_container_width=True)
+                if st.button("Buy Now", width=True):
+                    if record_product_event("buy", product, category): # type: ignore
+                        st.link_button("Continue to retailer ↗", product_url,  width='stretch')
                 st.caption("You’ll complete your purchase on the retailer’s website.")
             else:
                 st.button(
                     "Purchase link unavailable",
                     disabled=True,
-                    use_container_width=True,
+                    width='stretch',
                 )
 
     st.stop()
@@ -321,7 +323,7 @@ with header:
         unsafe_allow_html=True,
     )
 with sign_out:
-    if st.button("Sign out", use_container_width=True):
+    if st.button("Sign out",  width='stretch'):
         st.session_state.authenticated = False
         st.session_state.user_id = None
         st.session_state.page = "login"
@@ -352,7 +354,7 @@ with st.form("shopping_search_form", clear_on_submit=False):
             label_visibility="collapsed",
         )
     with right:
-        submitted = st.form_submit_button("Search products", use_container_width=True)
+        submitted = st.form_submit_button("Search products",  width='stretch')
 
 st.markdown(
     '<div class="search-hint">Tip: include your use case, preferred style, budget, size, or any must-have features.</div>',
@@ -412,7 +414,7 @@ if bundles:
                         """,
                         unsafe_allow_html=True,
                     )
-                    st.image(image_url, use_container_width=True)
+                    st.image(image_url,  width='stretch')
                 else:
                     st.markdown(
                         '<div class="empty-state">Image unavailable</div>',
@@ -450,7 +452,7 @@ if bundles:
                 if st.button(
                         "View Product",
                         key=f"view_product_{bundle_index}_{category}",
-                        use_container_width=True,):
+                         width='stretch'):
                     if record_product_event("click", product, category):
                         st.session_state.selected_product = product
                         st.session_state.selected_category = category
